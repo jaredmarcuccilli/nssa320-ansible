@@ -1,0 +1,262 @@
+---
+# Author: Jared Marcuccilli
+# Editor: Matt Harris
+# Install Zabbix 5 Server
+
+- hosts: prod_zabbix
+  become: true
+  vars_prompt:
+    - name: "root_password"
+      prompt: "Enter MySQL root password"
+      private: yes
+    - name: "zabbix_db_password"
+      prompt: "Enter Zabbix DB password"
+      private: yes
+
+  tasks:
+    - name: Install Zabbix repository
+      yum:
+        name: https://repo.zabbix.com/zabbix/5.0/rhel/7/x86_64/zabbix-release-5.0-1.el7.noarch.rpm
+        state: present
+        disable_gpg_check: True
+
+    #Needed for PyMySQL 2
+    - name: Install epel-release
+      yum:
+        name: epel-release
+        state: present
+
+    #- name: Download MySQL Community Repo
+    #  get_url:
+    #    url: http://repo.mysql.com/mysql-community-release-el7-7.noarch.rpm
+    #    dest: /tmp
+
+    #- name: Install MySQL Community Repo
+    #  yum:
+    #    name: /tmp/mysql-community-release-el7-7.noarch.rpm
+    #    state: present
+
+    - name: Testing with MariaDB instead
+      yum:
+        name: mariadb-server
+        state: present
+
+    - name: Install First batch
+      yum:
+        name:
+          #step 2b
+          - zabbix-server-mysql
+          - zabbix-agent
+          #step 2c
+          - centos-release-scl
+          - php
+        state: present
+
+    - name: Enable zabbix-frontend
+      ini_file:
+        dest: /etc/yum.repos.d/zabbix.repo 
+        section: zabbix-frontend
+        option: enabled 
+        value: "1"
+        backup: yes
+
+    - name: Install Second batch
+      yum:
+        name:
+          #required zabbix-frontend to be enabled
+          - zabbix-web-mysql-scl #includes httpd supposedly
+          - zabbix-apache-conf-scl
+          #mysql
+          #- mysql
+          #- mysql-server
+          #apache
+          - httpd
+          #Python stuff
+          - rh-python38-python-PyMySQL.noarch
+          - python2-PyMySQL.noarch
+          #should be covered, but just in case
+          - rh-php72-php-fpm
+        state: present
+    
+    - name: Start and enable MySQL
+      service:
+        name: mariadb
+        state: started
+        enabled: yes
+
+    - name: Set MySQL root password
+      mysql_user: user=root password="{{ root_password }}" host="localhost"
+
+    - name: Secure the root user for IPV6 localhost (::1)
+      mysql_user: login_user=root login_password="{{ root_password }}" user=root password="{{ root_password }}" host="::1"
+
+    - name: Secure the root user for IPV4 localhost (127.0.0.1)
+      mysql_user: login_user=root login_password="{{ root_password }}" user=root password="{{ root_password }}" host="127.0.0.1"
+
+    - name: Secure the root user for localhost domain
+      mysql_user: login_user=root login_password="{{ root_password }}" user=root password="{{ root_password }}" host="localhost"
+
+    - name: Secure the root user for server_hostname domain
+      mysql_user: login_user=root login_password="{{ root_password }}" user=root password="{{ root_password }}" host="{{ ansible_fqdn }}"
+
+    - name: Remove anonymous MySQL users
+      mysql_user: login_user=root login_password="{{ root_password }}" user="" state="absent"
+
+    - name: Remove MySQL test database
+      mysql_db: login_user=root login_password="{{ root_password }}" db=test state=absent
+
+    - name: Set MySQL variables
+      mysql_variables:
+        login_user: root
+        login_password: "{{ root_password }}"
+        variable: innodb_file_format
+        value: "Barracuda"
+
+    - name: Set MySQL variables
+      mysql_variables:
+        login_user: root
+        login_password: "{{ root_password }}"
+        variable: innodb_file_per_table
+        value: "on"
+
+    - name: Set MariaDB variables
+      mysql_variables:
+        login_user: root
+        login_password: "{{ root_password }}"
+        variable: innodb_large_prefix
+        value: "on"
+
+    - name: Restart MariaDB
+      service:
+        name: mariadb
+        state: restarted
+   
+    - name: Create Zabbix database
+      mysql_db: login_user=root login_password="{{ root_password }}" name=zabbix state=present encoding=utf8 collation=utf8_bin
+     
+    - name: Create Zabbix MySQL user
+      mysql_user: login_user=root login_password="{{ root_password }}" name=zabbix password="{{ zabbix_db_password }}" priv="zabbix.*:ALL" state=present
+ 
+    #- name: Set MySQL variables
+    #  mysql_variables:
+    #    login_user: root
+    #    login_password: "{{ root_password }}"
+    #    variable: innodb_default_row_format
+    #    value: "DYNAMIC"
+
+    - name: Import initial Zabbix data
+      #shell: zcat /usr/share/doc/zabbix-server-mysql*/create.sql.gz | mysql -u zabbix -pzabbix -p zabbix
+      shell: zcat /usr/share/doc/zabbix-server-mysql*/create.sql.gz | mysql -uzabbix -p{{ zabbix_db_password }} zabbix
+
+    - name: Edit Zabbix DB password in config
+      lineinfile:
+        path: /etc/zabbix/zabbix_server.conf
+        regexp: "^# DBpassword="
+        line: DBPassword={{ zabbix_db_password }}
+
+    - name: Edit PHP timezone in config
+      lineinfile:
+        path: /etc/opt/rh/rh-php72/php.ini
+        regexp: "^;date.timezone"
+        line: date.timezone = America/New_York
+
+    - name: Start and enable PHP-FPM
+      service:
+        name: rh-php72-php-fpm
+        state: started
+        enabled: yes
+
+    #Yeah let's not do this
+    #- name: Fix permissions on /var/run/zabbix (there must be a way to avoid this)
+    #  file: dest=/var/run/zabbix mode=o+rwx
+
+    - name: Add HTTP firewall rule
+      firewalld:
+        port: 80/tcp
+        permanent: yes
+        state: enabled
+        immediate: yes
+
+    - name: Add Zabbix firewall rule
+      firewalld:
+        port: 10050/tcp
+        permanent: yes
+        state: enabled
+        immediate: yes
+
+    - name: Add Zabbix firewall rule
+      firewalld:
+        port: 10051/tcp
+        permanent: yes
+        state: enabled
+        immediate: yes
+
+    #Probably not needed
+    #- name: Restart firewalld
+    #  service:
+    #     name: firewalld
+    #     state: restarted
+    #     enabled: yes
+
+    - name: Set Zabbix/HTTPD sebool
+      seboolean:
+        name: httpd_can_connect_zabbix
+        state: yes
+        persistent: yes
+   
+    #this might be useful
+    - name: http to db
+      seboolean:
+        name: httpd_can_network_connect_db
+        state: yes
+        persistent: yes
+
+    - name: Start and enable Zabbix server
+      service:
+        name: zabbix-server
+        state: restarted
+        enabled: yes
+
+    - name: Configure SELinux module for Zabbix server
+      shell: ausearch -c 'zabbix_server' --raw | audit2allow -M my-zabbixserver
+
+    - name: Enable SELinux module for Zabbix server
+      shell: semodule -i my-zabbixserver.pp
+
+    - name: More SELinux for Zabbix server
+      shell: curl https://support.zabbix.com/secure/attachment/53320/zabbix_server_add.te > zabbix_server_add.te
+
+    - name: More SELinux for Zabbix server
+      shell: checkmodule -M -m -o zabbix_server_add.mod zabbix_server_add.te
+
+    - name: More SELinux for Zabbix server
+      shell: semodule_package -m zabbix_server_add.mod -o zabbix_server_add.pp
+
+    - name: More SELinux for Zabbix server
+      shell: semodule -i zabbix_server_add.pp
+
+    - name: Start Zabbix again
+      service:
+        name: zabbix-server
+        state: restarted
+
+    - name: Start and enable Zabbix agent
+      service:
+        name: zabbix-agent
+        state: restarted
+        enabled: yes
+
+    - name: Start and enable httpd
+      service:
+        name: httpd
+        state: restarted
+        enabled: yes
+
+    #- name: Start and enable php-fpm
+    #  service:
+    #    name: php-fpm
+    #    state: restarted
+    #    enabled: yes
+
+    - debug:
+        msg: http://hostname/zabbix Admin/zabbix

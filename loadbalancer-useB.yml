@@ -1,0 +1,30 @@
+---
+# Author: Jared Marcuccilli
+# Date: 10/24/2020
+# Version 1.0
+# Operations test: TBD
+# Security test: TBD
+# Problems addressed: TBD
+# Description: Switch prod-loadbalancer to use B web servers.
+
+- hosts: prod_loadbalancer
+  become: true
+  tasks:
+  
+    - name: Update to use B servers in haproxy.cfg
+      blockinfile:
+        path: /etc/haproxy/haproxy.cfg
+        marker: "{mark}"
+        marker_begin: "# START ANSIBLE MANAGED BLOCK"
+        marker_end: "# END ANSIBLE MANAGED BLOCK"
+        block: |
+          backend http_back
+            balance roundrobin
+            server prod-web1b 192.168.200.93:80 check
+            server prod-web2b 192.168.206.91:80 check
+            server prod-web3b 192.168.203.229:80 check
+
+    - name: Restart haproxy
+      service:
+        name: haproxy
+        state: restarted

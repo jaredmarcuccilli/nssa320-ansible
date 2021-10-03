@@ -1,0 +1,54 @@
+---
+# Author: Michael Vasile
+# Install Zabbix 5 Agent
+
+- hosts: prod_web_all
+  become: true
+
+  tasks:
+    - name: Install Zabbix repository
+      yum:
+        name: https://repo.zabbix.com/zabbix/5.0/rhel/7/x86_64/zabbix-release-5.0-1.el7.noarch.rpm
+        state: present
+        disable_gpg_check: True
+
+    - name: Install Zabbix Agent & libsemanage-python
+      yum:
+        name:
+          - zabbix-agent
+          - libsemanage-python
+        state: present
+
+    - name: Add Monitoring Port Rule
+      firewalld:
+        port: 10050/tcp
+        permanent: yes
+        state: enabled
+        immediate: yes
+
+    - name: Reload firewalld
+      command: firewall-cmd --reload
+
+    - name: Set Zabbix server IP address in Agent Config
+      lineinfile:
+        path: /etc/zabbix/zabbix_agentd.conf
+        regexp: "^Server=127.0.0.1"
+        line: Server=192.168.204.41
+    
+    - name: Set Zabbix server port in Agent Config
+      lineinfile:
+        path: /etc/zabbix/zabbix_agentd.conf
+        regexp: "^# ListenPort="
+        line: ListenPort=10050
+
+    - name: Disable ServerActive in Agent Config
+      lineinfile:
+        path: /etc/zabbix/zabbix_agentd.conf
+        regexp: "^ServerActive=127.0.0.1"
+        line: "# ServerActive=127.0.0.1"
+
+    - name: Start and enable Zabbix agent
+      service:
+        name: zabbix-agent
+        state: restarted
+        enabled: yes

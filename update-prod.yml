@@ -1,0 +1,33 @@
+---
+# Author: Jared Marcuccilli
+# Date: 9/22/2020
+# Version 1.0
+# Operations test: Passed 9/22/20
+# Security test: N/A
+# Problems addressed: N/A
+# Description: Update and verify connectivity to prod web servers.
+
+  - name: Update Prod
+    hosts: prod
+    become: true
+    tasks:
+    - name: Update all packages
+      yum: 
+        name: "*" 
+        state: latest
+
+    - name: Reboot
+      shell: "sleep 5 && reboot"
+      async: 1
+      poll: 0
+
+    - name: Wait
+      pause:
+        seconds: 10
+
+    - name: Reconnect
+      wait_for_connection:
+        connect_timeout: 20
+        sleep: 5
+        delay: 5
+        timeout: 60

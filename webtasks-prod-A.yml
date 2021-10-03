@@ -1,0 +1,130 @@
+---
+# Author: Jared Marcuccilli & Matthew Harris
+# Date: 9/22/2020
+# Version 1.0
+# Operations test: Passed 9/22/20
+# Security test: N/A
+# Problems addressed: N/A
+# Description: Deploy Apache and "Explore California" site on prod web servers.
+
+- hosts: prod_web_primary
+  become: true
+  vars_prompt:
+    - name: "gituser"
+      prompt: "Enter your GitLab username"
+      private: no
+    - name: "gitpassword"
+      prompt: "Enter your GitLab password"
+      private: yes
+    
+  tasks:
+    - name: Install Apache
+      yum: name=httpd state=latest
+      
+    - name: Open HTTPS
+      firewalld: 
+        service: https
+        permanent: true
+        state: enabled
+        immediate: yes
+
+    - name: Open HTTP
+      firewalld: 
+        service: http
+        permanent: true
+        state: enabled
+        immediate: yes
+
+    - name: Install git
+      yum: 
+        name: git 
+        state: latest
+        
+    - name: Delete existing html files, if present
+      file:
+        path: /var/www/html
+        state: absent
+
+    - name: Download site from git
+      git: 
+        repo: https://{{ gituser }}:{{ gitpassword }}@kgcoe-git.rit.edu/the-epic-320-group/explore_california.git
+        dest: "/var/www/html/"
+        force: yes
+        
+    - name: Move files out of explore_california directory
+      shell: mv /var/www/html/explore_california/* /var/www/html/
+      
+    - name: Install mod_ssl
+      yum: name=mod_ssl state=latest 
+      
+    - name: Create self-signed certificate, if configured.
+      command: >
+        openssl req -x509 -nodes -subj '/CN={{ inventory_hostname }}' -days 365
+        -newkey rsa:4096 -sha256 -keyout /etc/pki/tls/private/server.key -out /etc/pki/tls/certs/server.crt
+        creates=/etc/pki/tls/certs/server.crt
+
+    - name: Change ssl.conf for HTTPS
+      lineinfile:
+        path: /etc/httpd/conf.d/ssl.conf
+        regexp: '^SSLCertificateFile'
+        line: SSLCertificateFile /etc/pki/tls/certs/server.crt
+        
+    - name: Change ssl.conf for HTTPS
+      lineinfile:
+        path: /etc/httpd/conf.d/ssl.conf
+        regexp: '^SSLCertificateKeyFile'
+        line: SSLCertificateKeyFile /etc/pki/tls/private/server.key
+        
+    - name: Hide Apache information
+      lineinfile:
+        path: /etc/httpd/conf/httpd.conf
+        line: ServerTokens Prod
+        create: yes
+        
+    - name: Hide Apache information
+      lineinfile:
+        path: /etc/httpd/conf/httpd.conf
+        line: ServerSignature Off
+        create: yes
+        
+    - name: Hide FileEtag
+      lineinfile:
+        path: /etc/httpd/conf/httpd.conf
+        line: FileETag None
+        create: yes    
+        
+    - name: Disable Apache index listing
+      lineinfile:
+        path: /etc/httpd/conf/httpd.conf
+        regexp: '^\s*Options Indexes FollowSymLinks'
+        line: Options None
+        
+    - name: Disable unnecessary modules
+      lineinfile:
+        path: /etc/httpd/conf.modules.d/00-base.conf
+        regexp: '^LoadModule info_module modules/mod_info.so'
+        line: '#LoadModule info_module modules/mod_info.so'
+        
+    - name: Disable unnecessary modules
+      lineinfile:
+        path: /etc/httpd/conf.modules.d/00-base.conf
+        regexp: '^LoadModule info_module modules/mod_userdir.so'
+        line: '#LoadModule info_module modules/mod_userdir.so'
+        
+    - name: Disable unnecessary modules
+      lineinfile:
+        path: /etc/httpd/conf.modules.d/00-base.conf
+        regexp: '^LoadModule mod_autoindex modules/mod_autoindex.so'
+        line: '#LoadModule mod_autoindex modules/mod_autoindex.so'
+        
+    - name: Set Apache ServerName
+      lineinfile:
+        path: /etc/httpd/conf/httpd.conf
+        line: ServerName {{ inventory_hostname }}
+        create: yes
+        
+    - name: Start/Restart Apache
+      service:
+        name: httpd
+        state: restarted
+        enabled: yes

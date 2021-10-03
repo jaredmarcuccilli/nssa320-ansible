@@ -1,0 +1,46 @@
+---
+# Author: Michael Vasile
+# Date: 10/11/2020
+# Version 1.0
+# Operations test: TBD
+# Security test: TBD
+# Problems addressed: TBD
+# Description: Deploy HAProxy for the existing Apache environment on the production web servers
+
+- hosts: prod_loadbalancer
+  become: true
+  tasks:
+  
+    - name: Install HAProxy
+      yum:
+        name:
+          - haproxy
+        state: present
+
+    - name: Add frontend configuration to haproxy.cfg
+      lineinfile:
+        path: /etc/haproxy/haproxy.cfg
+        line: "frontend http_front\n\tbind *:80\n\tstats uri /haproxy?stats\n\tdefault_backend http_back\n"
+        state: present
+
+    - name: Add backend configuration to haproxy.cfg
+      lineinfile:
+        path: /etc/haproxy/haproxy.cfg
+        line: "# MARK ANSIBLE MANAGED BLOCK\nbackend http_back\n  balance roundrobin\n  server prod-web1 192.168.201.207:80 check\n  server prod-web2 192.168.203.91:80 check\n  server prod-web3 192.168.202.157:80 check\n# MARK ANSIBLE MANAGED BLOCK"
+        state: present
+
+    - name: Add firewalld rule for http
+      firewalld:
+        port: 80/tcp
+        permanent: yes
+        state: enabled
+        immediate: yes
+
+    - name: Reload firewalld
+      command: firewall-cmd --reload
+
+    - name: Restart and enable haproxy
+      service:
+        name: haproxy
+        state: restarted
+        enabled: yes

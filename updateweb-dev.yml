@@ -1,0 +1,39 @@
+---
+# Author: Matthew Harris
+# Date: 10/20/2020
+# Version 1.0
+# Operations test: Passed against dev on 10/25/2020
+# Security test: N/A
+# Problems addressed: N/A
+# Description: Redeploy explore california web server docs
+
+- hosts: dev_web
+  become: true
+  vars_prompt:
+    - name: "gituser"
+      prompt: "Enter your GitLab username"
+      private: no
+    - name: "gitpassword"
+      prompt: "Enter your GitLab password"
+      private: yes
+    
+  tasks:
+    - name: Delete existing html files, if present
+      file:
+        path: /var/www/html
+        state: absent
+
+    - name: Download site from git
+      git: 
+        repo: https://{{ gituser }}:{{ gitpassword }}@kgcoe-git.rit.edu/the-epic-320-group/explore_california.git
+        dest: "/var/www/html/"
+        force: yes
+        
+    - name: Move files out of explore_california directory
+      shell: mv /var/www/html/explore_california/* /var/www/html/
+    
+    - name: Start/Restart Apache
+      service:
+        name: httpd
+        state: restarted
+        enabled: yes
